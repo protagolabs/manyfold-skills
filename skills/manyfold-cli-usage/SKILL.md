@@ -1,7 +1,7 @@
 ---
 name: manyfold-cli-usage
 description: Operate the Manyfold platform and delegate to peer agents on the user's behalf via the mf CLI (channels, automations, skills, files, backups, model config, usage, auth/scopes, and A2A). Run `mf help --agent` for the always-current guide.
-version: 0.1.0
+version: 0.2.0
 ---
 # Manyfold CLI (`mf`) — agent guide
 
@@ -56,19 +56,26 @@ to approve, then retry. Targeting another agent **without** `--account` → `403
 - `mf help safety --agent` — hard rules: secrets, consent URL, scope grants
 - `mf help channels --agent` — Telegram, Slack, Discord, Lark channel management
 - `mf help channels create --agent` — creating a channel step by step
+- `mf help channels send --agent` — agent-initiated sends: DM, chat post, native reply
 - `mf help automations --agent` — scheduled jobs: create, run, update, delete
 - `mf help files --agent` — agent workspace files: list, read, write, mv, rm
 - `mf help model-config --agent` — read or update the agent model configuration
 - `mf help skills --agent` — install, discover and manage agent skills
+- `mf help connections --agent` — external accounts (GitHub, Cloudflare, Composio) linked to the agent
 - `mf help runtime --agent` — runtime lifecycle, control UI, dashboard
 - `mf help agent --agent` — agent CRUD, storage, credentials, logs
 - `mf help backups --agent` — agent snapshots: list, create, restore
 - `mf help usage --agent` — token and cost statistics
-- `mf help a2a --agent` — talk to any A2A server directly (no account needed)
+- `mf help a2a --agent` — call A2A servers or manage this agent’s A2A exposure and callers
 
 Add `--json` to any `mf help … --agent` call for a machine-readable
-envelope (`topic`, `cliVersion`, `topics`, `content`). Most data commands
-also accept `--json`. `mf <command> --help` shows human-readable flags.
+envelope (`topic`, `cliVersion`, `topics`, `content`). Most commands also
+accept `--json`; with it, the result is raw JSON on stdout and a failure is
+emitted as `{ "error": { "code", "status"?, "message", "hint"? } }` on
+stderr (never the raw response body), so both success and failure stay
+parseable. Exit codes are stable in every mode: 2 network failure, 3 auth
+(401/403), 4 not found, 5 invalid usage or arguments (400/422), 1 anything
+else. `mf <command> --help` shows human-readable flags.
 
 ## Failure recovery
 
@@ -83,13 +90,12 @@ also accept `--json`. `mf <command> --help` shows human-readable flags.
 
 ## Available grant scopes
 
-agents:read, agents:edit, agent-runtimes:read, agent-runtimes:edit, sandboxes:read, sandboxes:edit, channels:read, channels:edit, automations:read, automations:edit, chat:read, chat:edit, a2a:read, a2a:edit, model-providers:read, model-providers:edit, model-config:read, model-config:edit, secrets:read, secrets:edit, skills:read, skills:edit, backups:read, backups:edit, terminal:read, terminal:edit, files:read, files:edit, usage:read, byo-providers:read, byo-providers:edit
+agents:read, agents:edit, agent-runtimes:read, agent-runtimes:edit, sandboxes:read, sandboxes:edit, channels:read, channels:edit, automations:read, automations:edit, chat:read, chat:edit, a2a:read, a2a:edit, model-providers:read, model-providers:edit, model-config:read, model-config:edit, secrets:read, secrets:edit, skills:read, skills:edit, backups:read, backups:edit, terminal:read, terminal:edit, files:read, files:edit, usage:read, byo-providers:read, byo-providers:edit, connections:read, connections:edit
 
 ## Safety (always applies)
 
-- Never print `~/.manyfold/config.json` (or any `~/.manyfold/config.*.json` profile),
-  legacy `~/.config/mf/config.json` / `~/.config/nca/config.json`, or any
-  token value.
+- Never print `~/.manyfold/profiles/<name>/config.json`, any file below a
+  profile's `daemon/` directory, or any token value.
 - Only share the consent URL with the user — the URL alone is safe.
 - Request the minimum scopes the task needs.
 - Full rules: `mf help safety --agent`
@@ -119,6 +125,13 @@ A `<target>` is resolved automatically:
 
 ```sh
 mf a2a status                              # peers you may call + in-flight calls
+mf a2a exposure get                        # show hosted A2A state + endpoints
+mf a2a exposure enable                     # publish this agent as an A2A server
+mf a2a exposure disable                    # stop publishing this agent
+mf a2a callers list                        # callers allowed to invoke this agent
+mf a2a callers add --external --name ci    # mint a one-time external bearer
+mf a2a callers add --caller-agent-id <id>  # authorize a Manyfold peer
+mf a2a callers revoke <tokenId> --yes      # revoke an external or peer grant
 mf a2a send <target> "<prompt>"            # send a message, wait for the result
 mf a2a send <target> "<prompt>" --async    # submit, return a task id, don't block
 mf a2a send <target> "<prompt>" --stream   # stream status + artifact chunks (SSE)
@@ -138,11 +151,50 @@ mf a2a card <url>                          # print an Agent Card
   stdout. The peer runs in its own workspace, billed to its own owner, and
   cannot read your workspace.
 
+### Manage this agent's A2A server
+
+Exposure and callers are separate controls. Adding a caller does **not**
+enable exposure; run both commands when publishing an agent for the first
+time:
+
+```sh
+mf a2a exposure enable
+mf a2a callers add --external --name build-system
+```
+
+`exposure get|enable|disable` reports the public Agent Card and JSON-RPC
+URLs. `callers list` shows every non-revoked peer and External client
+grant, including expired grants. Read operations need `a2a:read`; changing
+exposure or callers needs `a2a:edit`. If a runtime token lacks a scope,
+request it with `mf auth ensure --scopes a2a:read` or
+`mf auth ensure --scopes a2a:edit`.
+
+`callers add` requires exactly one mode:
+
+- `--external [--name <name>] [--expires-in-days <positive-int>]` creates
+  a bearer for a non-Manyfold client. In human mode the new token is the
+  only stdout line; copy it directly to secure storage. The warning,
+  token id, expiry, Card URL, and RPC URL go to stderr. `--json` returns
+  the full object including the one-time token. The CLI never saves it and
+  cannot display it again.
+- `--caller-agent-id <id> [--expires-in-days <positive-int>]
+[--replace-existing]` grants one Manyfold peer. It returns only grant
+  metadata and never exposes the internal bearer.
+
+Use `mf a2a callers revoke <tokenId> --yes` to revoke either kind. Every
+leaf command supports `--json`.
+
 ### Long tasks: submit async, fetch later
 
-A blocking `send` holds the call open until the peer finishes. For a long
-task prefer `--async`: it returns a **task id** immediately, so the work
-survives even if your sandbox sleeps while the peer runs.
+A blocking `send` holds the call open until the peer finishes, and the
+hosted server caps a blocking turn short (default **10 minutes**). For a
+long task prefer `--async`: it returns a **task id** immediately, the work
+survives even if your sandbox sleeps while the peer runs, and the server
+applies its much longer async cap (default **2 hours**; operators can tune
+both caps). Async is **not unbounded**: past the cap the task fails with
+`turn_timeout` and the peer's turn is cancelled — whatever it produced by
+then is visible via `mf a2a tasks get`. Split work that may exceed the cap
+into smaller delegations.
 
 ```sh
 id=$(mf a2a send <peer> "<long task>" --async)   # prints the task id to stdout
@@ -169,7 +221,10 @@ session with no memory of earlier calls.
   (local dev only; HTTPS public hosts only by default — SSRF guard).
 - `--timeout <seconds>` — client deadline for `send` and `tasks get --wait`
   (`0` disables; default 900). The hosted server enforces its own per-turn
-  cap; this is the client-side backstop so the CLI never hangs forever.
+  caps (blocking vs async, see "Long tasks"); this is the client-side
+  backstop so the CLI never hangs forever. The 900s default comfortably
+  covers the default 600s blocking cap — raise it if the operator raised
+  the blocking cap.
 - `send` also accepts `--context-id <id>`, `--task-id <id>`, `--skill <id>`,
   and `--input-file <path>` (attached as an A2A file part).
 
@@ -187,6 +242,8 @@ stderr as `cli Error: …` and exit 1; tokens are never included.
 - `no usable A2A token` / `a2a:read` missing → run
   `mf auth ensure --scopes a2a:read`, post the consent URL to the user
   (existing permissions are kept), retry after they approve.
+- `a2a:edit` missing while changing exposure/callers → run
+  `mf auth ensure --scopes a2a:edit` and retry after approval.
 - `needs an agent context` (user token) → add `--agent-id <id>` for an agent
   you own, e.g. `mf --agent-id <id> a2a status`.
 - `too many concurrent A2A delegations` → you have hit the in-flight cap;
@@ -199,4 +256,3 @@ stderr as `cli Error: …` and exit 1; tokens are never included.
   localhost/private; pass `--allow-http-localhost` for local dev.
 - `401` / `403` on a url target → provide or fix `--bearer`
   (or `$MF_A2A_BEARER`).
-```
