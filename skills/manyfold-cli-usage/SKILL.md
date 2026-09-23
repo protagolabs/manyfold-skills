@@ -1,7 +1,7 @@
 ---
 name: manyfold-cli-usage
 description: Operate the Manyfold platform and delegate to peer agents on the user's behalf via the mf CLI (channels, automations, skills, files, backups, model config, usage, auth/scopes, and A2A). Run `mf help --agent` for the always-current guide.
-version: 0.2.0
+version: 0.2.1
 ---
 # Manyfold CLI (`mf`) — agent guide
 
@@ -63,6 +63,7 @@ to approve, then retry. Targeting another agent **without** `--account` → `403
 - `mf help skills --agent` — install, discover and manage agent skills
 - `mf help connections --agent` — external accounts (GitHub, Cloudflare, Composio) linked to the agent
 - `mf help runtime --agent` — runtime lifecycle, control UI, dashboard
+- `mf help sandbox --agent` — scoped sandbox storage, cached readings and attribution
 - `mf help agent --agent` — agent CRUD, storage, credentials, logs
 - `mf help backups --agent` — agent snapshots: list, create, restore
 - `mf help usage --agent` — token and cost statistics
